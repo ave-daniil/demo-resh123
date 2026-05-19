@@ -1,0 +1,24 @@
+14) Настройка времени на всех устройствах
+  # timedatectl
+  # ls /usr/share/zoneinfo/
+  # ls /usr/share/zoneinfo/Europe
+  # timedatectl set-timezone Europe/Moscow
+Для изменения даты и времени при необходимости:
+  # timedatectl set-time "<дата> <время>"
+  # timedatectl
+
+15) Настройка VLAN (не работает вообще, я бы не лез)
+
+
+  # dfn install openvswitch NetworkManager-ovs -y
+  # systemctl enable --now openvswitch
+  # ovs-vsctl add-br hq-sw
+  # ovs-vsctl add-port hq-sw ens35 tag=100	| порт hq-srv
+  # ovs-vsctl add-port hq-sw ens36 tag=200	| порт cli
+  # ovs-vsctl add-port hq-sw ens34 tag=999	| порт упраления
+  # ovs-vsctl add-port hq-sw vlan100 tag=100 -- set interface vlan100 type=internal
+  # ovs-vsctl add-port hq-sw vlan200 tag=200 -- set interface vlan200 type=internal
+  # ovs-vsctl add-port hq-sw vlan999 tag=999 -- set interface vlan999 type=internal
+  # systemctl restart openvswitch
+  # systemctl restart NetworkManager
+  # ip link set hq-sw up
