@@ -1,0 +1,225 @@
+1) Настройка Samba на br-srv
+На hq-srv:
+  # nano /etc/named.conf
+Дописываем строку:
+	|Allow-transfer {192.168.100.*; };	|ip br-srv
+  # systemctl restart named
+  # setenforce 0
+  # hostnamectl
+  # dnf install samba* krb5* -y
+На br-srv:
+  # nmtui
+Прописываем 	DNS1: 192.168.100.*	| ip hq-srv
+		DNS2: 192.168.100.*	| ip br-srv
+		Домены поиска: au-team.irpo	(см. задание)
+
+  # nano /etc/systemd/resolved.conf
+Активируем строку и отключаем (прописываем "no")
+	|DNSStublistener = no
+  # systemctl restart systemd-resolved.service NetworkManager
+  # cat /etc/resolv.conf
+Вывод должен отличатся от 127.0.0.53 и правильный домен поиска
+
+  # mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
+  # cp /etc/krb5.conf /etc/krb5.conf.bak
+  # nano /etc/krb5.conf
+Приводим к следующему виду:
+	| ...
+	| [libdefaults]
+	|     dns_lookup-realm = false
++	|     dns_lookup_kdc = true
+	|     ticket_lifetime = 24h
+	| #    renew_lifetime = 7d 
+	|     forwardable = true
+	| #    ...
+	| #    ...
+	|     default-realm = AU-TEAM.IRPO
+	| #    ...
+	| [realms]
+	| AU-TEAM.IRPO = {
+	| kdc = br-srv.au-team.irpo
+	| admin_server = br-srv.au-team.irpo
+	| }
+	| [domain_realm]
+	| .au-team.irpo = AU-TEAM.IRPO
+	| au-team.irpo = AU-TEAM.IRPO
+
+  # samba-tool domain provision --use-rfc2307 --interactive
+И жмем Enter Enter "dc" Enter Enter P@ssw0rd P@ssw0rd
+  # systemctl enable --now samba
+  # systemctl status samba
+  # samba-tool domain info 127.0.0.1
+  # samba-tool domain info 192.168.100.*	|ip br-srv
+
+Добавление пользователей:
+  # samba-tool user add user1.hq P@ssw0rd
+  # samba-tool user add user2.hq P@ssw0rd
+  # samba-tool user add user3.hq P@ssw0rd
+  # samba-tool user add user4.hq P@ssw0rd
+  # samba-tool user add user5.hq P@ssw0rd
+  # samba-tool group add hq
+  # samba-tool group addmembers hq user1.hq,user2.hq,user3.hq,user4.hq,user5.hq
+  # samba-tool user list
+На hq-cli прописываем дополнительный DNS сервер ip br-srv и в терминале
+  # join-to-domain.sh
+	Продолжить выполнение: y
+	Выберите тип домена: 1
+	Имя домена[...] Enter
+	Имя ПК: hq-cli
+	Имя админ: Administrator
+	Продолжить выполнение: y
+	Вводим пароль
+Перезагружаем hq-cli и входим под доменным пользователем
+На br-srv проверяем
+  # samba-tool computer list
+  # samba-tool computer list --full-dn
+  # samba-tool user list
+  # samba-tool user list --full-dn
+
+Привелегии для выполнения команд:
+  # nano /etc/sudoers.d/hq
+Прописываем:
+	| %hq AL=(ALL) /usr/bin/cat, /usr/bin/grep
+	| %hq AL=(ALL) NOPASSWD:/usr/bin/cat, /usr/bin/grep
+Для просмотра полного пути для команды можно использовать:
+  # which <команда>
+
+Импорт пользователей
+  # head /opt/Users.csv
+  # nano samba-user-add.sh
+Прописываем:
+	| #! /bin/bash
+	| FILE="/opt/Users.csv"
+	| while IFS=';' read -r fitstname lastname role phone ou zip city country region password
+	| 	samba-tool user add "$firstname.$lastname" "$password"
+	| done < <(tail -n +2 "$FILE")
+Сохраняем файл скрипта
+  # chmod +x /root/samba-user-add.sh
+  # cd /root
+  # ./samba-user-add.sh
+
+2) Файловое хранилище
+
+3) Настройка службы сетевого времени
+На hq-rtr
+  # dnf install -y chrony
+  # nano /etc/chrony.conf
+Коментируем строки 4 строки "server..." и дописываем 
+	| server 127.0.0.1 iburst prefer
+	| local stratum 5
+	| allow 0/0
+Сохраняем и активируем
+  # systemctl restart chronyd
+  # systemctl enable --now chronyd
+  # chronyc sources
+На hq-srv, hq-cli, br-rtr, br-srv установить пакет chrony  
+  # dnf install -y chrony
+  # nano /etc/chrony.conf
+В файле конфигурации коментируем все "server" и добовляем свой.
+	| server 192.168.100.1 iburst
+Сохраняем и запускаем
+  # systemctl enable --now chronyd
+  # systemctl restart chronyd
+На клиенте проверить можно командой
+  # chronyc sources
+На сервере проверить подключение клиентов
+  # chronyc clients
+
+4) Конфигурация ansible на сервере br-srv
+  # dnf install -y ansible
+  # ssh-keygen -t rsa
+  # ls -l ~/.ssh
+	id_rsa - закрытый ключ
+	id_rsa.pub - открытый ключ
+Переходим под пользователем sshuser
+  # su sshuser
+  # ssh-keygen -t rsa
+?Копируем ключи на удаленные устройства?
+На br-srv 
+  # ssh-copy-id -p 2026 sshuser@192.168.100.*	|ip hq-srv 
+  # ssh-copy-id user@192.168.100.*		|ip cli
+  # ssh-copy-id net_admin@172.16.1.2		|ip hq-rtr в isp
+  # ssh-copy-id net_admin@172.16.2.2		|ip br-rtr в isp
+Подготовка файла инвентаря
+  # nano /etc/ansible/hosts
+Прописываем в начале файла:
+	| [hq]
+	| 192.168.100.* ansible_port=2026 ansible_user=sshuser	|ip hq-srv
+	| 192.168.100.* ansible_user=user			|ip cli
+	| 172.16.1.2 ansible_user=net_admin			|ip hq-rtr
+	| [br]
+	| 172.16.2.2 ansible_user=net_admin			|ip br-rtr
+Запуск команд:
+  # ansible all -m ping
+Если не заработает то:
+  # nano /etc/ansible/ansible.cfg
+Прописываем:
+	| [defaults] 
+	| interpreter_python=auto_silent
+После этого запускаем заново пинг:
+  # ansible all -m ping
+
+6) Проброс портов
+На br-rtr  
+  # nano /etc/nftables/isp.nft
+Добовляем правило:
+	| chain PREROUTING {
+	| type nat hook prerouting priority filter;
+	| ip daddr 172.16.2.2 tcp dport 80 dnat ip to 192.168.100.*:8080	|ip br-srv
+	| ip daddr 172.16.1.2 tcp dport 2026 dnat ip to 192.168.100.*:2026	|ip br-srv
+	| }
+Для проверки на cli в браузере в адресной строке пишем "http://172.16.2.2"
+И для проверки проброса порта 2026 с cli подключаемся по ssh к br-rtr
+  # ssh sshuser@172.16.2.2 -p2026
+Должны попасть на br-srv
+
+Проброс порта на hq-rtr
+На hq-rtr  
+  # nano /etc/nftables/isp.nft
+Добовляем правило:
+	| chain PREROUTING {
+	| type nat hook prerouting priority filter;
+	| ip daddr 172.16.1.2 tcp dport 2026 dnat ip to 192.168.100.*:2026	|ip hq-srv
+	| }
+Для проверки с cli подключаемся по ssh к hq-rtr по порту 2026
+  # ssh sshuser@172.168.1.2 -p2026
+Должны попасть на hq-srv
+
+8) Веб-сервер nginx на hq-rtr
+Устанавливаем добовляем и открываем:
+  # dnf install -y nginx
+  # systemctl enable --now nginx
+  # nano /etc/nginx/nginx.conf
+Прописываем в файле перед последней скобкой:
+	| server {
+	| 	listen 80;
+	| 	server_name moodle.au-team.irpo;
+	| 
+	| 	location / {
+	| 		proxy_pass http://192.168.100.*:80;	|ip hq-srv
+	| 	}
+	| }
+	| 
+	| server {
+	| 	listen 80;
+	| 	server_name wiki.au-team.irpo;
+	| 
+	| 	location / {
+	| 		proxy_pass http://192.168.100.*:8080;	|ip br-srv
+	| 	}
+	| }
+Перезапускаем:
+  # systemctl restart nginx
+Для проверки на cli в браузере заходим по доменному имени:
+  moodle.au-team.irpo
+  wiki.au-team.irpo
+
+9) Установка яндекс браузера
+Делается через «Главного меню» - > «Параметры» - > «Окно настройки РЕД ОС»
+Переходим на вкладку «Партнерские приложения» - > выберите из списка
+Яндекс.Браузер.
+В появившемся окне «Установка» со списком устанавливаемых пакетов и
+зависимостей нажать кнопку «Принять».
+Вводим пароль.
+После установки Яндекс.Браузер доступен «Главного меню» - >
+«Интернет» - > «Yandex Browser».
