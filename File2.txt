@@ -107,16 +107,16 @@
 Коментируем строки 4 строки "server..." и дописываем 
 	| server 127.0.0.1 iburst prefer
 	| local stratum 5
-	| allow 0/0
+	| allow 0.0.0.0/0
 Сохраняем и активируем
   # systemctl restart chronyd
   # systemctl enable --now chronyd
   # chronyc sources
-На hq-srv, hq-cli, br-rtr, br-srv установить пакет chrony  
+На hq-srv, hq-cli, hq-rtr, br-srv, br-rtr установить пакет chrony  
   # dnf install -y chrony
   # nano /etc/chrony.conf
 В файле конфигурации коментируем все "server" и добовляем свой.
-	| server 192.168.100.1 iburst
+	| server 172.16.10.1 iburst	|на br 172.16.20.1 iburst
 Сохраняем и запускаем
   # systemctl enable --now chronyd
   # systemctl restart chronyd
@@ -125,38 +125,22 @@
 На сервере проверить подключение клиентов
   # chronyc clients
 
-4) Конфигурация ansible на сервере br-srv
-  # dnf install -y ansible
-  # ssh-keygen -t rsa
-  # ls -l ~/.ssh
-	id_rsa - закрытый ключ
-	id_rsa.pub - открытый ключ
-Переходим под пользователем sshuser
-  # su sshuser
-  # ssh-keygen -t rsa
-?Копируем ключи на удаленные устройства?
-На br-srv 
-  # ssh-copy-id -p 2026 sshuser@192.168.100.*	|ip hq-srv 
-  # ssh-copy-id user@192.168.100.*		|ip cli
-  # ssh-copy-id net_admin@172.16.1.2		|ip hq-rtr в isp
-  # ssh-copy-id net_admin@172.16.2.2		|ip br-rtr в isp
+4) Конфигурация ansible на сервере br-srv 
+  # dnf install -y ansible sshpass
 Подготовка файла инвентаря
   # nano /etc/ansible/hosts
 Прописываем в начале файла:
 	| [hq]
-	| 192.168.100.* ansible_port=2026 ansible_user=sshuser	|ip hq-srv
-	| 192.168.100.* ansible_user=user			|ip cli
-	| 172.16.1.2 ansible_user=net_admin			|ip hq-rtr
+	| 192.168.100.2 ansible_port=2011 ansible_user=sshuser	|ip hq-srv
+	| 192.168.100.34 ansible_user=user			|ip cli
+	| 192.168.100.1 ansible_user=net_admin			|ip hq-rtr
 	| [br]
-	| 172.16.2.2 ansible_user=net_admin			|ip br-rtr
-Запуск команд:
-  # ansible all -m ping
-Если не заработает то:
+	| 192.168.100.25 ansible_user=net_admin			|ip br-rtr
+Открываем файл и прописываем:
   # nano /etc/ansible/ansible.cfg
-Прописываем:
-	| [defaults] 
+	| host_key_checking = False
 	| interpreter_python=auto_silent
-После этого запускаем заново пинг:
+Запускаем пинг на всех хостах:
   # ansible all -m ping
 
 6) Проброс портов
@@ -165,12 +149,12 @@
 Добовляем правило:
 	| chain PREROUTING {
 	| type nat hook prerouting priority filter;
-	| ip daddr 172.16.2.2 tcp dport 80 dnat ip to 192.168.100.*:8080	|ip br-srv
-	| ip daddr 172.16.1.2 tcp dport 2026 dnat ip to 192.168.100.*:2026	|ip br-srv
+	| ip daddr 172.16.20.2 tcp dport 80 dnat ip to 192.168.100.26:8080	|ip br-srv
+	| ip daddr 172.16.10.2 tcp dport 2011 dnat ip to 192.168.100.26:2011	|ip br-srv
 	| }
-Для проверки на cli в браузере в адресной строке пишем "http://172.16.2.2"
-И для проверки проброса порта 2026 с cli подключаемся по ssh к br-rtr
-  # ssh sshuser@172.16.2.2 -p2026
+Для проверки на cli в браузере в адресной строке пишем "http://172.16.20.2"
+И для проверки проброса порта 2011 с cli подключаемся по ssh к br-rtr
+  # ssh sshuser@172.16.2.2 -p2011
 Должны попасть на br-srv
 
 Проброс порта на hq-rtr
@@ -179,10 +163,10 @@
 Добовляем правило:
 	| chain PREROUTING {
 	| type nat hook prerouting priority filter;
-	| ip daddr 172.16.1.2 tcp dport 2026 dnat ip to 192.168.100.*:2026	|ip hq-srv
+	| ip daddr 172.16.1.2 tcp dport 2011 dnat ip to 192.168.100.2:2011	|ip hq-srv
 	| }
 Для проверки с cli подключаемся по ssh к hq-rtr по порту 2026
-  # ssh sshuser@172.168.1.2 -p2026
+  # ssh sshuser@172.168.10.2 -p2011
 Должны попасть на hq-srv
 
 8) Веб-сервер nginx на hq-rtr
@@ -223,3 +207,6 @@
 Вводим пароль.
 После установки Яндекс.Браузер доступен «Главного меню» - >
 «Интернет» - > «Yandex Browser».
+ИЛИ 
+  # dnf search yandex
+  # dnf install yandex-browser-stable -y
